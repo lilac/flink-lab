@@ -10,6 +10,9 @@ import org.apache.flink.streaming.api.scala.StreamExecutionEnvironment
 import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.windowing.assigners.{ GlobalWindows, TumblingEventTimeWindows }
 import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.table.api.scala.StreamTableEnvironment
+import org.apache.flink.table.api.scala._
+import org.apache.flink.types.Row
 
 object LogProcess {
   def main(args: Array[String]): Unit = {
@@ -46,9 +49,35 @@ object LogProcess {
 //      .window(GlobalWindows.create())
 //      .timeWindowAll(Time.minutes(30))
     .sum(1)
+        .map {row => row match {
+          case (log, c) => Stat(log.id, log.sessionId, log.time, c)
+        }}.assignAscendingTimestamps(_.time)
 
     sessionEvents.print("logs")
     clicks.print("clicks")
+
+    val tableEnv = StreamTableEnvironment.create(env)
+    val table = tableEnv.fromDataStream(clicks, 'id, 'sessionId, 'time, 'clicks)
+    table.printSchema()
+
+    val matches = tableEnv.sqlQuery(
+      s"""
+        |SELECT *
+        | FROM $table
+        | MATCH_RECOGNIZE (
+        |  PARTITION BY sessionId
+        |  ORDER BY `time`
+        |  MEASURES
+        |    A.id AS aid,
+        |    B.id AS bid,
+        |    A.clicks AS ac,
+        |    B.clicks As bc
+        |  PATTERN (A B)
+        |  DEFINE
+        |    B AS B.id <> A.id and B.clicks > 2 * A.clicks or A.clicks > B.clicks * 2
+        |) AS T
+        |""".stripMargin)
+//    matches.toAppendStream[Row].print()
 
     env.execute("Log process")
   }
@@ -68,5 +97,6 @@ object LogProcess {
   case class Log(id: String, time: Timestamp,
                  sessionId: String, action: String) extends BaseLog(id, time)
 
+  case class Stat(id: String, sessionId: String, time: Timestamp, clicks: Int)
 }
 
