@@ -43,7 +43,8 @@ object LogProcess {
     val clicks = sessionEvents
       .map {log => (log, 1)}
       .keyBy(_._1.id)
-      .timeWindow(Time.minutes(30))
+//      .window(GlobalWindows.create())
+//      .timeWindowAll(Time.minutes(30))
     .sum(1)
 
     sessionEvents.print("logs")
